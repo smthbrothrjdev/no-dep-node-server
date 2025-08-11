@@ -1,54 +1,135 @@
+// src/index.ts
 import { createServer, IncomingMessage, ServerResponse } from 'http';
-import { createReadStream, promises as fsPromises } from 'fs';
-import { join, extname } from 'path';
+import { createReadStream, promises as fs } from 'fs';
+import { join, extname, normalize, resolve, relative, isAbsolute } from 'path';
 
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const PUBLIC_DIR = join(__dirname, 'public');
 
-function serveStatic(req: IncomingMessage, res: ServerResponse): boolean {
-	if (!req.url) return false;
-	// only handle under /public or naked /
-	let filePath = req.url === '/'
-		? join(PUBLIC_DIR, 'index.html')
-		: join(PUBLIC_DIR, req.url);
-
-	// prevent path-traversal
-	if (!filePath.startsWith(PUBLIC_DIR)) return false;
-
-	return fsPromises.stat(filePath)
-		.then(stats => {
-			if (stats.isDirectory()) {
-				filePath = join(filePath, 'index.html');
-				return fsPromises.stat(filePath);
-			}
-			return stats;
-		})
-		.then(() => {
-			const ext = extname(filePath).slice(1);
-			const mime = {
-				html: 'text/html',
-				css: 'text/css',
-				js: 'application/javascript',
-				png: 'image/png',
-				jpg: 'image/jpeg',
-				svg: 'image/svg+xml',
-			}[ext] || 'application/octet-stream';
-
-			res.writeHead(200, { 'Content-Type': mime });
-			createReadStream(filePath).pipe(res);
-			return true;
-		})
-		.catch(() => false);
+/** Minimal MIME map */
+function guessMime(ext: string): string {
+	const map: Record<string, string> = {
+		html: 'text/html; charset=utf-8',
+		css: 'text/css; charset=utf-8',
+		js: 'application/javascript; charset=utf-8',
+		mjs: 'application/javascript; charset=utf-8',
+		json: 'application/json; charset=utf-8',
+		svg: 'image/svg+xml',
+		png: 'image/png',
+		jpg: 'image/jpeg',
+		jpeg: 'image/jpeg',
+		gif: 'image/gif',
+		webp: 'image/webp',
+		ico: 'image/x-icon',
+		txt: 'text/plain; charset=utf-8'
+	};
+	return map[ext] || 'application/octet-stream';
 }
 
-const server = createServer((req, res) => {
-	serveStatic(req, res)
-		.then(handed => {
-			if (handed) return;
-			// ... your other routing logic here ...
-			res.writeHead(404, { 'Content-Type': 'text/plain' });
-			res.end('Not Found\n');
+/** Ensure child is inside parent (prevents path traversal) */
+function isInside(parent: string, child: string): boolean {
+	const rel = relative(parent, child);
+	return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+/** Serve files under dist/public; returns true if handled */
+async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+	if (!req.url) return false;
+	if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+
+	// Strip query/hash and decode
+	const rawPath = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
+	const normalized = normalize(rawPath === '/' ? '/index.html' : rawPath);
+
+	// Build and validate the absolute file path
+	let filePath = resolve(join(PUBLIC_DIR, normalized));
+	if (!isInside(PUBLIC_DIR, filePath)) return false;
+
+	try {
+		let stats = await fs.stat(filePath);
+		if (stats.isDirectory()) {
+			filePath = resolve(join(filePath, 'index.html'));
+			if (!isInside(PUBLIC_DIR, filePath)) return false;
+			stats = await fs.stat(filePath);
+		}
+
+		// Conditional GET support (If-Modified-Since)
+		const ims = req.headers['if-modified-since'];
+		if (ims) {
+			const imsTime = new Date(ims).getTime();
+			if (!Number.isNaN(imsTime) && stats.mtime.getTime() <= imsTime) {
+				res.writeHead(304, {
+					'Last-Modified': stats.mtime.toUTCString(),
+					'Cache-Control': 'public, max-age=300',
+					'X-Content-Type-Options': 'nosniff'
+				});
+				res.end();
+				return true;
+			}
+		}
+
+		const ext = extname(filePath).slice(1).toLowerCase();
+		const headers = {
+			'Content-Type': guessMime(ext),
+			'Content-Length': String(stats.size),
+			'Last-Modified': stats.mtime.toUTCString(),
+			'Cache-Control': 'public, max-age=300',
+			'X-Content-Type-Options': 'nosniff'
+		};
+
+		if (req.method === 'HEAD') {
+			res.writeHead(200, headers);
+			res.end();
+			return true;
+		}
+
+		res.writeHead(200, headers);
+		const stream = createReadStream(filePath);
+		stream.on('error', () => {
+			if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+			res.end('Internal Server Error\n');
 		});
+		stream.pipe(res);
+		return true;
+	} catch {
+		return false; // let the router handle (likely 404)
+	}
+}
+
+const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+	// Try static files first
+	if (await serveStatic(req, res)) return;
+
+	// Example API route (optional)
+	if (req.method === 'GET' && req.url === '/healthz') {
+		res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+		res.end('ok\n');
+		return;
+	}
+
+	// Fallback 404
+	res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+	res.end('Not Found\n');
 });
 
-// ... listen as before ...
+server.listen(PORT, () => {
+	console.log(`🚀 Server listening on http://localhost:${PORT}`);
+});
+
+// Graceful shutdown (optional)
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+let shuttingDown = false;
+function shutdown() {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	console.log('\nShutting down...');
+	server.close(err => {
+		if (err) {
+			console.error('Error during shutdown:', err);
+			process.exit(1);
+		}
+		process.exit(0);
+	});
+}
 
