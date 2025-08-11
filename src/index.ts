@@ -2,10 +2,23 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { createReadStream, promises as fs } from 'fs';
 import { join, extname, normalize, resolve, relative, isAbsolute } from 'path';
+import { parseFlags } from './utils/cliFlags';
+import { enableMetrics } from './perf/metrics';
+import type { Socket } from 'net';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const PUBLIC_DIR = join(__dirname, 'public');
 
+// parsing flags logic
+const flags = parseFlags();
+
+let metrics: ReturnType<typeof enableMetrics> | null = null;
+if (flags.metrics) {
+	metrics = enableMetrics({
+		sampleMs: flags.metricsSample,
+		thresholdMs: flags.metricsThreshold,
+	});
+}
 /** Minimal MIME map */
 function guessMime(ext: string): string {
 	const map: Record<string, string> = {
@@ -97,6 +110,9 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<b
 }
 
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+	//metrics hook in
+	res.on('finish', () => metrics?.incr());
+
 	// Try static files first
 	if (await serveStatic(req, res)) return;
 
@@ -116,20 +132,42 @@ server.listen(PORT, () => {
 	console.log(`🚀 Server listening on http://localhost:${PORT}`);
 });
 
-// Graceful shutdown (optional)
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-let shuttingDown = false;
-function shutdown() {
-	if (shuttingDown) return;
-	shuttingDown = true;
-	console.log('\nShutting down...');
+const sockets = new Set<Socket>();
+server.on('connection', (sock: Socket) => {
+	sockets.add(sock);
+	sock.on('close', () => sockets.delete(sock));
+});
+
+// helpful defaults to avoid long keeps
+server.keepAliveTimeout = 5000;   // 5s
+server.headersTimeout = 7000;   // 7s
+
+function shutdown(reason = 'SIGTERM') {
+	console.log(`\nShutting down (${reason})...`);
+	// stop new work
 	server.close(err => {
 		if (err) {
-			console.error('Error during shutdown:', err);
-			process.exit(1);
+			console.error('Error during server.close:', err);
 		}
-		process.exit(0);
+		// kill any stragglers
+		for (const s of sockets) s.destroy();
+		metrics?.disable?.();
+		process.exit(err ? 1 : 0);
 	});
+
+	// optional: short deadline for active reqs, then destroy
+	const FORCE_EXIT_MS = 5000;
+	setTimeout(() => {
+		console.warn(`Force exit after ${FORCE_EXIT_MS}ms`);
+		for (const s of sockets) s.destroy();
+		metrics?.disable?.();
+		process.exit(1);
+	}, FORCE_EXIT_MS).unref();
 }
+
+// make it impossible to forget the ()
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+
+
 

@@ -53,6 +53,67 @@ Environment variables:
 - **Static**: open `http://localhost:3000/`.
 - **API**: `GET /healthz` → `200 OK` with a small JSON payload.
 
+### Optional: Performance Metrics Mode
+You can enable live performance logging with the `--metrics` flag.  
+This logs:
+- Requests per second
+- Event-loop lag in milliseconds (only if it exceeds a threshold)
+
+```bash
+# Start with metrics
+PORT=3000 node dist/index.js --metrics
+```
+
+Optional flags:
+- `--metrics-threshold=<ms>` → Minimum lag to log (default: 50ms)
+- `--metrics-sample=<ms>` → Sampling interval for lag check (default: 1000ms)
+
+Example:
+```bash
+PORT=3000 node dist/index.js --metrics --metrics-threshold=80 --metrics-sample=500
+```
+
+### Benchmarking with autocannon
+Run the benchmark tool from a separate terminal while the server is running:
+
+```bash
+npx autocannon -c 50 -d 10 http://localhost:3000/healthz
+```
+Where:
+- `-c` = concurrent connections
+- `-d` = duration in seconds
+
+### Concurrency test
+1. Add a slow route to `src/index.ts` for testing:
+```ts
+if (req.method === 'GET' && req.url === '/slow') {
+  setTimeout(() => {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('done\n');
+  }, 3000);
+  return;
+}
+```
+2. In two terminals:
+```bash
+npx autocannon -c 10 -d 15 http://localhost:3000/slow
+```
+```bash
+npx autocannon -c 50 -d 15 http://localhost:3000/healthz
+```
+If `/healthz` stays fast while `/slow` is loading, the server is handling concurrent requests without blocking.
+
+### Killing a process on port 3000
+If you accidentally start multiple servers and get `EADDRINUSE`:
+```bash
+kill -9 $(lsof -t -i :3000)   # Linux/macOS
+```
+Windows PowerShell:
+```powershell
+netstat -ano | findstr :3000
+taskkill /PID <PID> /F
+```
+
 ## Scripts
 ```jsonc
 {
