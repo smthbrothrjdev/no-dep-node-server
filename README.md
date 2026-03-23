@@ -233,5 +233,7 @@ Tracking your envisioned server features:
 ## CONTRIBUTING
 See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
+## Developer (non-security) Audit
+See [Dev-Audit](./DEV-AUDIT.md)
 ## License
 MIT
