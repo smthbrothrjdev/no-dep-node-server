@@ -9,7 +9,6 @@ import type { Socket } from 'net';
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const PUBLIC_DIR = join(__dirname, 'public');
 
-// parsing flags logic
 const flags = parseFlags();
 
 let metrics: ReturnType<typeof enableMetrics> | null = null;
@@ -19,7 +18,7 @@ if (flags.metrics) {
 		thresholdMs: flags.metricsThreshold,
 	});
 }
-/** Minimal MIME map */
+
 function guessMime(ext: string): string {
 	const map: Record<string, string> = {
 		html: 'text/html; charset=utf-8',
@@ -39,22 +38,18 @@ function guessMime(ext: string): string {
 	return map[ext] || 'application/octet-stream';
 }
 
-/** Ensure child is inside parent (prevents path traversal) */
 function isInside(parent: string, child: string): boolean {
 	const rel = relative(parent, child);
 	return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
-/** Serve files under dist/public; returns true if handled */
 async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
 	if (!req.url) return false;
 	if (req.method !== 'GET' && req.method !== 'HEAD') return false;
 
-	// Strip query/hash and decode
 	const rawPath = decodeURIComponent(req.url.split('?')[0].split('#')[0]);
 	const normalized = normalize(rawPath === '/' ? '/index.html' : rawPath);
 
-	// Build and validate the absolute file path
 	let filePath = resolve(join(PUBLIC_DIR, normalized));
 	if (!isInside(PUBLIC_DIR, filePath)) return false;
 
@@ -116,7 +111,6 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 	// Try static files first
 	if (await serveStatic(req, res)) return;
 
-	// Example API route (optional)
 	if (req.method === 'GET' && req.url === '/healthz') {
 		res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
 		res.end('ok\n');
@@ -155,7 +149,6 @@ function shutdown(reason = 'SIGTERM') {
 		process.exit(err ? 1 : 0);
 	});
 
-	// optional: short deadline for active reqs, then destroy
 	const FORCE_EXIT_MS = 5000;
 	setTimeout(() => {
 		console.warn(`Force exit after ${FORCE_EXIT_MS}ms`);
@@ -165,7 +158,6 @@ function shutdown(reason = 'SIGTERM') {
 	}, FORCE_EXIT_MS).unref();
 }
 
-// make it impossible to forget the ()
 process.once('SIGINT', () => shutdown('SIGINT'));
 process.once('SIGTERM', () => shutdown('SIGTERM'));
 
