@@ -146,11 +146,12 @@ function shutdown(reason = 'SIGTERM') {
 		if (err) {
 			console.error('Error during server.close:', err);
 		}
-		// kill any stragglers
-		for (const s of sockets) s.destroy();
 		metrics?.disable?.();
 		process.exit(err ? 1 : 0);
 	});
+
+	// Close any raw TCP clients that have not completed an HTTP request.
+	for (const s of sockets) s.destroy();
 
 	const FORCE_EXIT_MS = 5000;
 	setTimeout(() => {
