@@ -46,14 +46,14 @@ This audit remains focused on **Epic 1: Core HTTP Foundation**. Items from later
 
 ## Current Repository Status
 
-The repository is still in the early phase of Epic 1, but it has moved beyond a placeholder server. The current implementation uses Node's built-in `http.createServer`, serves static assets from a compiled `dist/public` directory, exposes a `/healthz` endpoint, includes basic MIME detection, supports `GET` and `HEAD` for static files, handles `If-Modified-Since`, applies a short cache policy, tracks sockets for graceful shutdown, and has optional console performance metrics.
+The repository is still in the early phase of Epic 1, but it has moved beyond a placeholder server. The current implementation uses Node's built-in `http.createServer`, serves static assets from a compiled `dist/public` directory by default, allows the static subpath to be overridden with `STATIC_DIR`, exposes a JSON `/healthz` endpoint, includes basic MIME detection, supports `GET` and `HEAD` for static files, handles `If-Modified-Since`, applies a short cache policy, tracks sockets for graceful shutdown, and has optional console performance metrics.
 
 Important current-state observations:
 
-- The README says `STATIC_DIR` can configure the static path, but the implementation currently hardcodes `PUBLIC_DIR` to `join(__dirname, 'public')`.
-- The README says `/healthz` returns `200` JSON, but the implementation currently returns HTML from `src/endpoints/res.ts` and sets `Content-Type: text/html`.
+- The README's `STATIC_DIR` and `/healthz` JSON descriptions now broadly match runtime behavior, although `STATIC_DIR` is currently joined under `__dirname` rather than resolved as an arbitrary absolute/static root path.
+- The README's `npm run dev` reference now matches an available package script, but the README script block is still stale for `build`, `dev`, and `clean`.
 - The README project checklist is not yet marked to reflect implemented partials. Per CONTRIBUTING.md, implemented checklist items should be crossed off with brief progress notes.
-- There are no automated tests yet, and `npm test` is currently a failing placeholder.
+- Automated integration coverage now exists for the raw TCP listener, `/healthz`, and SIGTERM socket shutdown, and `npm test` currently passes. Coverage is still narrow for static files, conditional requests, path traversal, and configuration behavior.
 
 ---
 
@@ -155,19 +155,20 @@ Legend: `[x]` complete, `[~]` partial, `[ ]` not implemented.
 **Current Evidence:**
 - Responses are sent directly with `res.writeHead`, `res.end`, and stream piping.
 - Static files set `Content-Type`, `Content-Length`, `Last-Modified`, `Cache-Control`, and `X-Content-Type-Options`.
-- `/healthz` returns HTML, while README documents JSON.
+- `/healthz` returns JSON with `Content-Type: application/json; charset=utf-8`, matching the README's usage summary.
 - 404 and stream errors use plain text.
 
-**Assessment:** Node serializes the wire format correctly, but the project lacks a response abstraction. The mismatch between README and `/healthz` behavior should be resolved before marking this complete.
+**Assessment:** Node serializes the wire format correctly, and the README-documented `/healthz` JSON behavior is now implemented. The project still lacks a response abstraction, so this remains partial rather than complete.
 
 **Definition of Done:**
 - Standard response helpers exist. **Not met.**
 - Consistent JSON and error responses. **Not met.**
 - Centralized header management for common headers. **Partially met for static responses only.**
 - `HEAD` responses avoid a body while preserving headers. **Met for static files.**
+- README-documented `/healthz` JSON behavior. **Met.**
 
 **Recommended Next Step:**
-- Introduce small helpers such as `sendText`, `sendJson`, `sendNotFound`, and `sendError`, then update `/healthz` to match README or update README to match intentional HTML behavior.
+- Introduce small helpers such as `sendText`, `sendJson`, `sendNotFound`, and `sendError`, then migrate `/healthz`, 404, and static errors to those helpers so response behavior stays consistent as endpoints grow.
 
 **Risks:**
 - Inconsistent content types and response bodies.
@@ -183,7 +184,7 @@ Legend: `[x]` complete, `[~]` partial, `[ ]` not implemented.
 
 **Current Evidence:**
 - Static file handling is tried first.
-- `/healthz` is checked with a direct inline `if` statement.
+- `/healthz` is checked with a direct inline `if` statement after static lookup.
 - Fallback 404 is inline.
 - There is no route registry, parameter extraction, wildcard matching, or regex support.
 
@@ -247,7 +248,7 @@ Legend: `[x]` complete, `[~]` partial, `[ ]` not implemented.
 - Handles `If-Modified-Since` and returns `304` where applicable.
 - Adds `Cache-Control`, `Last-Modified`, and `X-Content-Type-Options`.
 - Does not implement ETag.
-- Does not honor README's documented `STATIC_DIR` environment variable.
+- Honors `STATIC_DIR` as a subpath joined under `__dirname`, but does not document or test whether absolute/out-of-tree directories are intentionally supported.
 
 **Assessment:** This is one of the strongest Epic 1 areas. The main blockers are ETag support, tests for traversal/conditional requests, and documentation/configuration alignment.
 
@@ -258,15 +259,15 @@ Legend: `[x]` complete, `[~]` partial, `[ ]` not implemented.
 - Supports caching headers. **Partially met.**
 - Implements `If-Modified-Since`. **Met.**
 - Implements ETag. **Not met.**
-- Honors configured static directory. **Not met despite README.**
+- Honors configured static directory. **Partially met; implemented as a compiled-output subpath, not a clearly specified arbitrary filesystem root.**
 
 **Recommended Next Step:**
-- Add weak ETags based on size and mtime, handle `If-None-Match`, and wire `STATIC_DIR` safely.
+- Add weak ETags based on size and mtime, handle `If-None-Match`, and clarify/test `STATIC_DIR` semantics, especially absolute paths and traversal-like values.
 
 **Risks:**
 - `decodeURIComponent` can throw on malformed escapes; currently that would be caught only by the outer async server behavior if not explicitly handled.
 - `isInside` returns false when parent and child are equal; this is okay for files but should be consciously tested with directory paths.
-- Static-directory configuration mismatch can confuse users and contributors.
+- Static-directory semantics can still confuse users if they expect an absolute or project-root-relative path instead of a path under compiled `dist/`.
 
 **Priority:** Medium
 
@@ -362,6 +363,7 @@ Legend: `[x]` complete, `[~]` partial, `[ ]` not implemented.
 **Current Evidence:**
 - Static handler splits `req.url` on `?` and `#`.
 - The decoded path is normalized before file resolution.
+- Malformed percent-encoding in `decodeURIComponent` is not handled locally by `serveStatic`.
 - There is no centralized parser returning path, query params, hash-stripped path, or decoded route params.
 
 **Assessment:** Current behavior is enough for static file lookup, but not enough for routing or API endpoints. A central parser should be added before expanding routes.
@@ -391,22 +393,22 @@ Legend: `[x]` complete, `[~]` partial, `[ ]` not implemented.
 
 The README is mostly directionally accurate, but current behavior differs in a few contributor-visible ways:
 
-- `STATIC_DIR` is documented but not implemented.
-- `/healthz` is documented as JSON but currently returns HTML.
-- `npm run dev` is documented, but `package.json` currently provides `watch`, `start`, `start:perf`, and no `dev` script.
+- `STATIC_DIR` is documented and now implemented, but its exact path semantics need clarification.
+- `/healthz` is documented as JSON and now returns JSON.
+- `npm run dev` is documented and now exists, but the README's script block still shows stale script definitions.
 - The checklist remains unchecked even for areas with partial or complete implementation.
 
 **Recommendation:** Either update README to match current behavior or update code/scripts to match README. CONTRIBUTING.md asks contributors to keep checklist progress current, so documentation drift should be treated as a quality issue.
 
 ### Testing Alignment
 
-**Status:** Needs Implementation
+**Status:** Needs Expansion
 
-CONTRIBUTING.md asks for tests where feasible and manual checks for `/healthz` and static `public/index.html`. Current automated coverage is absent, and `npm test` intentionally fails.
+CONTRIBUTING.md asks for tests where feasible and manual checks for `/healthz` and static `public/index.html`. Current automated coverage exists and `npm test` passes, but it is limited to the raw TCP listener, health response, and SIGTERM socket shutdown.
 
 **Recommendation:** Add `node:test` integration tests for:
 
-- `/healthz` status and content type.
+- `/healthz` status and content type. **Already covered at the raw TCP level; keep/expand as response helpers evolve.**
 - `/` serving the compiled public index.
 - `HEAD /` returning headers without a body.
 - traversal attempts returning non-file responses.
@@ -416,11 +418,11 @@ CONTRIBUTING.md asks for tests where feasible and manual checks for `/healthz` a
 
 ## Suggested Next Milestones for Epic 1
 
-1. **Fix documentation/runtime mismatches:** choose whether `/healthz` is JSON or HTML, add or remove `STATIC_DIR`, and align package scripts with README.
+1. **Finish documentation/runtime alignment:** clarify `STATIC_DIR` semantics, update the README script block, and mark checklist progress.
 2. **Extract response helpers:** centralize JSON, text, error, and not-found responses.
 3. **Add URL parsing utility:** safe `URL` parsing with consistent `pathname` and `searchParams` behavior.
 4. **Add minimal router:** method + path matching first; params/wildcards next.
-5. **Add tests using `node:test`:** especially for static serving and health checks.
+5. **Expand `node:test` coverage:** especially for static serving, `HEAD`, malformed paths, configured static directories, and conditional requests.
 6. **Add body-size-limited JSON parser:** do this before any new write endpoints.
 7. **Finish static caching:** implement ETag and `If-None-Match`.
 8. **Extract MIME utility:** make it testable and reusable.
@@ -429,6 +431,6 @@ CONTRIBUTING.md asks for tests where feasible and manual checks for `/healthz` a
 
 ## Audit Conclusion
 
-Epic 1 is **partially complete**. The project has a working dependency-free Node server with meaningful static hosting, graceful shutdown, basic health handling, and optional performance logging. However, Epic 1 should not be considered complete until routing, middleware, response helpers, body parsing, cookie handling, centralized URL/query parsing, ETag support, and tests are in place.
+Epic 1 is **partially complete**. The project has a working dependency-free Node server with meaningful static hosting, graceful shutdown, JSON health handling, a runnable development script, optional performance logging, and passing raw TCP integration tests. However, Epic 1 should not be considered complete until routing, middleware, response helpers, body parsing, cookie handling, centralized URL/query parsing, ETag support, broader static/configuration tests, and documentation checklist updates are in place.
 
-The most important near-term action is to reduce drift between README/CONTRIBUTING expectations and runtime behavior. Once documentation, tests, and small primitives are aligned, the project will have a stronger foundation for later security, authentication, observability, and operations epics.
+The most important near-term action is to build on the new test foothold while reducing the remaining README/CONTRIBUTING drift. Once documentation, tests, and small primitives are aligned, the project will have a stronger foundation for later security, authentication, observability, and operations epics.
