@@ -10,8 +10,9 @@
     "build": "tsc && node dist/copyPublic.js",
     "watch": "tsc --watch",
     "start": "node dist/index.js",
+    "dev": "sh -c 'npm run build -- --watch & node --watch --watch-path=dist dist/index.js'",
     "start:perf": "node dist/index.js --metrics"
-  },
+	},
   "keywords": [],
   "author": "",
   "license": "ISC",

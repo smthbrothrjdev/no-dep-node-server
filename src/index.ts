@@ -116,7 +116,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 	if (req.method === 'GET' && req.url === '/healthz') {
 		res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-		res.end(healthz);
+		res.end(JSON.stringify(healthz));
 		return;
 	}
 
