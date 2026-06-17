@@ -8,7 +8,9 @@ import type { Socket } from 'net';
 import { healthz } from './endpoints/res';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-const PUBLIC_DIR = join(__dirname, 'public');
+const public_subpath = process.env.STATIC_DIR ? process.env.STATIC_DIR : 'public'
+const PUBLIC_DIR = join(__dirname, public_subpath);
+
 
 const flags = parseFlags();
 
@@ -113,7 +115,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 	if (await serveStatic(req, res)) return;
 
 	if (req.method === 'GET' && req.url === '/healthz') {
-		res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+		res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
 		res.end(healthz);
 		return;
 	}

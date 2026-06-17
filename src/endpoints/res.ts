@@ -1,2 +1,2 @@
-export const healthz = '<h1> Main Service Health </h1>';
+export const healthz = { main: 'healthy' };
 
