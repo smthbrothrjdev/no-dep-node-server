@@ -5,6 +5,7 @@ import { join, extname, normalize, resolve, relative, isAbsolute } from 'path';
 import { parseFlags } from './utils/cliFlags';
 import { enableMetrics } from './perf/metrics';
 import type { Socket } from 'net';
+import { healthz } from './endpoints/res';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const PUBLIC_DIR = join(__dirname, 'public');
@@ -113,7 +114,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
 	if (req.method === 'GET' && req.url === '/healthz') {
 		res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-		res.end('<h1>ok</h1>')
+		res.end(healthz);
 		return;
 	}
 
