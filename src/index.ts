@@ -107,7 +107,13 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<b
 	}
 }
 
+const activeSockets = new Set<Socket>();
+
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+	activeSockets.add(req.socket);
+	res.on('finish', () => activeSockets.delete(req.socket));
+	res.on('close', () => activeSockets.delete(req.socket));
+
 	//metrics hook in
 	res.on('finish', () => metrics?.incr());
 
@@ -146,11 +152,15 @@ function shutdown(reason = 'SIGTERM') {
 		if (err) {
 			console.error('Error during server.close:', err);
 		}
-		// kill any stragglers
-		for (const s of sockets) s.destroy();
 		metrics?.disable?.();
 		process.exit(err ? 1 : 0);
 	});
+
+	// Close raw or idle TCP clients without interrupting active responses; the
+	// force-exit timer below still handles true stragglers after the grace period.
+	for (const s of sockets) {
+		if (!activeSockets.has(s)) s.destroy();
+	}
 
 	const FORCE_EXIT_MS = 5000;
 	setTimeout(() => {
