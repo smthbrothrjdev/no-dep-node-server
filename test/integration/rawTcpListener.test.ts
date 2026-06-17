@@ -1,21 +1,22 @@
-'use strict';
+import assert from 'node:assert/strict';
+import net from 'node:net';
+import { once } from 'node:events';
+import test from 'node:test';
+import { join } from 'node:path';
+import { spawnServer } from '../helpers/serverProcess';
 
-const assert = require('node:assert/strict');
-const net = require('node:net');
-const { once } = require('node:events');
-const test = require('node:test');
-const { healthz } = require('../../dist/endpoints/res.js');
-const { spawnServer } = require('../helpers/serverProcess.js');
+const { healthz } = require(join(process.cwd(), 'dist/endpoints/res.js')) as { healthz: unknown };
 
-function connect(port) {
+async function connect(port: number): Promise<net.Socket> {
   const socket = net.createConnection({ host: '127.0.0.1', port });
-  return once(socket, 'connect').then(() => socket);
+  await once(socket, 'connect');
+  return socket;
 }
 
-async function readUntilClose(socket) {
+async function readUntilClose(socket: net.Socket): Promise<string> {
   let response = '';
   socket.setEncoding('utf8');
-  socket.on('data', (chunk) => { response += chunk; });
+  socket.on('data', (chunk: string) => { response += chunk; });
   await once(socket, 'close');
   return response;
 }
@@ -40,7 +41,7 @@ test('SIGTERM gracefully closes an open raw TCP socket and exits', async (t) => 
 
   const socket = await connect(server.port);
   const socketClosed = once(socket, 'close');
-  const processExited = once(server.child, 'exit');
+  const processExited = once(server.child, 'exit') as Promise<[number | null, NodeJS.Signals | null]>;
 
   server.child.kill('SIGTERM');
 
