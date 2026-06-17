@@ -112,8 +112,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 	if (await serveStatic(req, res)) return;
 
 	if (req.method === 'GET' && req.url === '/healthz') {
-		res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-		res.end('ok\n');
+		res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+		res.end('<h1>ok</h1>')
 		return;
 	}
 
